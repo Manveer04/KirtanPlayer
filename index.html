@@ -1,0 +1,795 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>24/7 Kirtan Radio — Live</title>
+<link rel="icon" href="assets/icon/logo.png" />
+<style>
+  :root{
+    --fg:#e8f6ff;
+    --shade: rgba(0,0,0,.85);
+    --border: rgba(255,255,255,.16);
+    --glass: rgba(255,255,255,.08);
+    --glass-strong: rgba(255,255,255,.14);
+    --accent1: #7dd3fc;
+    --accent2: #60a5fa;
+    --danger:  #ff2b2b;
+    --npw: 360px;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0}
+  body{background:#000;color:var(--fg);font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Arial}
+
+  /* Stage & background video (slow zoom) */
+  .stage{position:fixed;inset:0;overflow:hidden}
+  .stage video{
+    position:absolute;inset:0;width:100%;height:100%;
+    object-fit:cover;filter:saturate(1.05) contrast(1.05) brightness(.9);
+    animation: slow-zoom 40s ease-in-out infinite alternate;
+  }
+
+  /* Waveform */
+  #wave{
+    position:absolute;left:0;right:0;top:85%;transform:translateY(-50%);
+    width:100%;height:80px;pointer-events:none;
+    mask-image: radial-gradient(800px 160px at 50% 50%, #000 70%, transparent 100%);
+    opacity: 0.6;
+  }
+
+  /* Bottom shade + control bar */
+  .bottom{position:absolute;left:0;right:0;bottom:0;pointer-events:none}
+  .shade{
+    position:absolute;left:0;right:0;bottom:0;height:200px;
+    background:linear-gradient(0deg,var(--shade) 0%, rgba(0,0,0,.6) 45%, transparent 100%);
+  }
+
+  /* Auto-hide controls */
+  .controls-wrap{position:relative;z-index:1;display:flex;justify-content:center;padding-bottom:14px;pointer-events:none}
+  .controls{
+    display:flex;align-items:center;gap:12px;min-width:min(92vw,980px);
+    padding:.6rem .9rem;border-radius:16px;background:rgba(0,0,0,.45);
+    backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
+    border:1px solid var(--border);
+    transform:translateY(8px);opacity:0;transition:opacity .25s ease, transform .25s ease;pointer-events:auto;
+  }
+  .controls-visible .controls{opacity:1;transform:none}
+  .controls-visible .controls-wrap{pointer-events:auto}
+
+    /* ===== Now Playing card (top-right) ===== */
+  .np-card{
+    position:absolute; top:16px; right:18px; z-index:2;
+    display:flex; align-items:center; gap:12px;
+    padding:10px 12px; border-radius:16px;
+    background:rgba(0,0,0,.50);
+    border:1px solid var(--border);
+    backdrop-filter: blur(8px);
+    transform: translateY(-6px);
+    opacity:0;
+    transition: opacity .25s ease, transform .25s ease;
+    max-width: min(96vw, 860px);     /* allow wide titles */
+  }
+  .np-card.show{ opacity:1; transform:none; }
+
+  .np-cover{
+    width:56px; height:56px; object-fit:cover; border-radius:12px;
+    border:1px solid rgba(255,255,255,.18);
+    box-shadow: 0 8px 28px rgba(0,0,0,.35);
+    transition: opacity .25s ease;
+  }
+
+  .np-card{ width: var(--npw); }         /* compact by default */
+  .np-card:hover,
+  .np-card:focus-within{
+    width: min(96vw, 860px);             /* stretch when hovered or focused */
+  }
+
+  /* Marquee container */
+  .marquee{
+    position: relative;
+    overflow: hidden;
+    /* padding-left: 3px; pushes text away from the album */
+    mask-image: linear-gradient(to right, transparent 0, #000 5px, #000 calc(100% - 28px), transparent 100%);
+    -webkit-mask-image: linear-gradient(to right, transparent 0, #000 5px, #000 calc(100% - 28px), transparent 100%);
+  }
+
+
+
+  /* The track that scrolls (two identical spans inside) */
+  #npTrack{
+    display:inline-block;
+    white-space: nowrap;
+    will-change: transform;
+    animation: np-scroll var(--np-duration, 12s) linear infinite;
+  }
+  @keyframes np-scroll{
+    from { transform: translateX(0); }
+    to   { transform: translateX(-50%); }
+  }
+
+
+  /* When expanded, show full static title (no marquee) */
+  .np-card:hover .marquee,
+  .np-card:focus-within .marquee{
+    mask-image: none;
+  }
+  .np-card:hover #npTrack,
+  .np-card:focus-within #npTrack{
+    animation: none;
+    transform: none;
+    white-space: normal;                  /* allow wrapping */
+    display: block;
+  }
+  .np-card:hover #npTitleClone,
+  .np-card:focus-within #npTitleClone{
+    display: none;                        /* hide duplicate */
+  }
+
+  /* Keep your actions behavior + reserve space when visible */
+  .np-card:hover .np-text,
+  .np-card:focus-within .np-text{ padding-right: 84px; }
+
+  /* Respect reduced motion */
+  @media (prefers-reduced-motion: reduce){
+    #npTrack{ animation: none !important; }
+  }
+
+  .np-text{ display:flex; flex-direction:column; min-width:0; }
+  .np-label{ font-size:.72rem; letter-spacing:.12em; text-transform:uppercase; opacity:.8; }
+  .np-title{
+    font-weight:800; line-height:1.2; font-size:.95rem;
+    /* FULL by default */
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    word-break: break-word;          /* wrap long words */
+    max-width: 100%;
+  }
+
+  @media (max-width: 720px){
+    .np-card{ top:10px; right:10px; padding:8px 10px; }
+    .np-cover{ width:44px; height:44px; border-radius:10px; }
+    .np-title{ max-width: 56vw; font-size:.9rem; }
+  }
+
+    /* Let text shrink to make space for actions */
+  .np-text{ display:flex; flex-direction:column; min-width:0; flex:1; }
+
+  /* Action buttons (hidden until hover) */
+  .np-actions{
+  position:absolute; right:10px; top:50%;
+  transform: translateY(calc(-50% - 4px)); /* small lift for nicer feel */
+  display:flex; gap:8px;
+  opacity:0; pointer-events:none;
+  transition: opacity .18s ease, transform .18s ease;
+  }
+  .np-card:hover .np-actions,
+  .np-card:focus-within .np-actions{
+    opacity:1; pointer-events:auto;
+    transform: translateY(-50%);
+  }
+
+  .np-card:focus-within .np-title{
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.np-card:focus-within .np-text{ padding-right: 84px; }
+
+  /* Add right padding only while hovering so title doesn’t sit under buttons */
+.np-card:hover .np-text{ padding-right: 84px; } /* 34+34+8+some breathing room */
+
+
+  .icon-btn{
+    appearance:none; cursor:pointer;
+    width:34px; height:34px; border-radius:10px;
+    border:1px solid var(--border);
+    background:var(--glass); color:#fff; font-size:16px; line-height:1;
+    display:grid; place-items:center;
+    transition:background .2s, box-shadow .2s, transform .06s;
+  }
+  .icon-btn:hover{ background:var(--glass-strong); box-shadow:0 0 12px rgba(255,255,255,.22); }
+  .icon-btn:active{ transform:translateY(1px); }
+
+  /* Always show actions on touch devices */
+  @media (hover:none){
+    .np-actions{ opacity:1; pointer-events:auto; }
+    .np-text{ padding-right: 84px; }
+    /* On touch, keep single-line to avoid tall cards */
+    .np-title{ white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  }
+
+
+  /* LIVE pill + pulse */
+  .live-pill{
+    display:flex;align-items:center;gap:8px;padding:.3rem .6rem;border-radius:999px;
+    background:rgba(255,0,0,.14);border:1px solid rgba(255,0,0,.55);
+    font-weight:800;letter-spacing:.6px;font-size:.85rem;text-transform:uppercase;
+  }
+  .live-pill::before{
+    content:"";width:8px;height:8px;border-radius:50%;background:var(--danger);
+    box-shadow:0 0 10px var(--danger),0 0 20px rgba(255,43,43,.6);animation:pulse 1.6s ease-in-out infinite;
+  }
+  @keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.25)}}
+
+  /* NEW: wrapper gets the animation (smooth, smaller zoom) */
+  .bg-wrap{
+    position:absolute; inset:-3%;          /* overscan to avoid edge resample */
+    overflow:hidden;
+    will-change: transform;
+    transform: translateZ(0) scale(1);     /* GPU promote */
+    transform-origin: 50% 50%;
+    animation: slow-zoom 40s linear infinite alternate;
+  }
+
+  .bgvid{
+    position:absolute; inset:0;
+    width:100%; height:100%;
+    object-fit:cover;
+    filter:saturate(1.05) contrast(1.05) brightness(.9);
+    /* Optional: helps some GPUs avoid shimmer */
+    backface-visibility:hidden;
+    pointer-events: none;
+    user-select: none;
+  }
+
+  /* Buttons */
+  .btn{
+    appearance:none;cursor:pointer;height:42px;min-width:42px;border-radius:12px;
+    border:1px solid var(--border);background:var(--glass);color:#fff;
+    display:inline-grid;place-items:center;padding:0 .9rem;font-size:15px;font-weight:700;
+    transition:transform .08s ease,box-shadow .2s ease,background .2s ease,border-color .2s ease,opacity .2s ease;
+  }
+  .btn:hover{background:var(--glass-strong);box-shadow:0 0 14px rgba(255,255,255,.25)}
+  .btn:active{transform:translateY(1px)}
+  .btn:disabled{opacity:.6;cursor:not-allowed}
+  .btn-icon{width:42px;padding:0}
+
+  .btn-primary{background:linear-gradient(135deg,var(--accent1),var(--accent2));border:none;color:#001018;box-shadow:0 6px 28px rgba(96,165,250,.35)}
+  .btn-primary:hover{filter:brightness(1.06)}
+  .btn-outline{background:transparent;border:1.5px solid rgba(255,255,255,.55)}
+  .btn-ghost{background:var(--glass);border:1px solid var(--border)}
+
+  /* True loading state: hide icon/text, show spinner only */
+  .btn.loading{position:relative;color:transparent !important}
+  .btn.loading::after{
+    content:"";position:absolute;inset:0;margin:auto;width:18px;height:18px;border-radius:999px;
+    border:2px solid rgba(255,255,255,.25);border-top-color:#fff;animation:spin .85s linear infinite;
+  }
+  @keyframes spin{to{transform:rotate(360deg)}}
+
+  /* Volume + EQ */
+  .vol{width:170px;accent-color:#fff;filter:drop-shadow(0 0 3px rgba(255,255,255,.35))}
+  .eq{appearance:none;background:#000;color:#fff;border:1.5px solid rgba(255,255,255,.8);border-radius:10px;padding:.45rem .6rem;font-weight:800;cursor:pointer}
+  .eq:hover{box-shadow:0 0 14px rgba(255,255,255,.25)}
+
+  /* Title */
+  .title{flex:1;text-align:center;font-weight:700;opacity:.95;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-shadow:0 0 10px rgba(255,255,255,.15)}
+
+  /* Brand chip */
+  .brand{
+    position:absolute;left:18px;top:16px;color:#dffef6;text-shadow:0 0 8px rgba(255,255,255,.25);
+    background:rgba(0,0,0,.35);border:1px solid rgba(255,255,255,.14);
+    padding:.35rem .6rem;border-radius:999px;backdrop-filter:blur(6px);animation:floaty 6s ease-in-out infinite;
+  }
+  @keyframes floaty{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}
+
+  /* ===== Centered Modal ===== */
+  .modal-backdrop{
+    position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
+    background:rgba(0,0,0,.55);backdrop-filter:blur(4px);
+    z-index:9999;opacity:0;visibility:hidden;transition:opacity .22s ease,visibility .22s ease;
+  }
+  .modal-backdrop.show{opacity:1;visibility:visible}
+  .modal{
+    width:min(92vw,680px);text-align:center;                /* center text */
+    background:rgba(10,16,20,.95);border:1px solid var(--border);
+    border-radius:18px;padding:20px 18px 16px;box-shadow:0 14px 60px rgba(0,0,0,.5);
+    transform:translateY(12px) scale(.985);opacity:0;transition:transform .22s ease,opacity .22s ease;
+  }
+  .modal-backdrop.show .modal{transform:none;opacity:1}
+  .modal h2{margin:.2rem 0 .4rem;font-size:1.2rem;letter-spacing:.2px}
+  .modal p{margin:.35rem 0 .9rem;opacity:.92;line-height:1.35}
+  .modal .row{display:flex;gap:10px;flex-wrap:wrap;justify-content:center} /* center buttons */
+  .modal .note{opacity:.7;font-size:.9rem;margin-top:.5rem}
+  .modal-hero{display:flex;align-items:center;justify-content:center;margin:-2px 0 12px}
+  .modal-hero img{
+    width:170px;height:170px;object-fit:contain;opacity:.98; /* bigger image */
+    filter:drop-shadow(0 6px 22px rgba(0,0,0,.45));animation:pop .28s ease both;
+  }
+  @keyframes pop{0%{transform:scale(.94);opacity:0}100%{transform:scale(1);opacity:1}}
+
+  @media (prefers-reduced-motion: reduce){
+    .stage video,.brand,.live-pill::before{animation:none !important}
+    .modal,.modal-backdrop{transition:none !important}
+    .btn.loading::after{animation:none !important}
+  }
+</style>
+</head>
+<body>
+  <div class="stage" id="stage">
+    <!-- NOTE: replace local path with a web path when hosting -->
+    <div class="bg-wrap">
+      <video class="bgvid"
+        src="assets/video/Loopvideo.mp4"
+        autoplay
+        muted
+        loop
+        playsinline
+        disablepictureinpicture
+        controlslist="nodownload noplaybackrate nofullscreen">
+      </video>
+    </div>
+
+
+    <div class="brand">
+      <img src="assets/icon/logo.png" alt="Logo" style="height: 35px; vertical-align: middle; margin-right: 1px;">
+      24/7 Kirtan Radio
+    </div>
+
+        <!-- Now Playing (top-right) -->
+    <div class="np-card" id="nowPlaying" aria-live="polite">
+      <img id="npCover" class="np-cover" src="assets/icon/logo.png" alt="Album art"
+          onerror="this.onerror=null; this.src='assets/icon/logo.png'">
+      <div class="np-text">
+        <div class="np-label">Now Playing</div>
+        <div class="np-title marquee">
+          <div class="marquee__track" id="npTrack">
+            <span id="npTitle">Live Stream</span>
+            <span id="npTitleClone" aria-hidden="true">Live Stream</span>
+          </div>
+        </div>
+      </div>
+      <!-- actions here -->
+      <div class="np-actions" aria-label="Title actions">
+        <button class="icon-btn" id="npCopyBtn" title="Copy title" aria-label="Copy title">📋</button>
+        <button class="icon-btn" id="npYTBtn" title="Search on YouTube" aria-label="Search on YouTube">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" style="display:block">
+            <path d="M23.498 6.186a2.994 2.994 0 0 0-2.107-2.117C19.222 3.5 12 3.5 12 3.5s-7.222 0-9.391.569A2.994 2.994 0 0 0 .502 6.186C0 8.357 0 12 0 12s0 3.643.502 5.814a2.994 2.994 0 0 0 2.107 2.117C4.778 20.5 12 20.5 12 20.5s7.222 0 9.391-.569a2.994 2.994 0 0 0 2.107-2.117C24 15.643 24 12 24 12s0-3.643-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+
+
+    <canvas id="wave" aria-hidden="true"></canvas>
+
+    <div class="bottom">
+      <div class="shade" aria-hidden="true"></div>
+
+      <div class="controls-wrap" id="controlsWrap">
+        <div class="controls" id="controls">
+          <div class="live-pill">Live</div>
+
+          <button class="btn btn-icon" id="playBtn" title="Play/Pause" aria-label="Play/Pause">►</button>
+
+          <select class="eq" id="eqPreset" title="Equalizer preset">
+            <option value="off">EQ: Off</option>
+            <option value="bass">EQ: Bass Boost</option>
+            <option value="vocal">EQ: Vocal Boost</option>
+            <option value="bright">EQ: Bright</option>
+          </select>
+
+          <div class="title">Live Stream</div>
+
+          <input class="vol" type="range" id="vol" min="0" max="1" step="0.01" value="0.9" title="Volume"/>
+          <button class="btn btn-icon" id="muteBtn" title="Mute/Unmute" aria-label="Mute/Unmute">🔊</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Hidden audio -->
+  <audio id="radio" preload="none" crossorigin="anonymous">
+    <source id="primarySource" src="https://sapircast.caster.fm:10445/VCDm1?token=50047da8366f30e461ee378bc9f6369d" type="audio/mpeg" />
+  </audio>
+
+  <!-- Modal -->
+  <div class="modal-backdrop" id="altModal" role="dialog" aria-modal="true" aria-labelledby="altTitle">
+    <div class="modal">
+      <div class="modal-hero">
+        <!-- Replace path for deployment -->
+        <img id="altImg" src="assets/icon/disconnencted.png" alt="Disconnected" onerror="this.style.display='none'">
+      </div>
+      <h2 id="altTitle">Stream isn’t loading</h2>
+      <p id="altReason">We’re having trouble starting the live stream.</p>
+      <div class="row">
+        <button class="btn btn-primary" id="retryBtn" title="Try the main stream again">Retry</button>
+        <button class="btn btn-outline" id="openAlt" title="Open alternate link">Open Alternate</button>
+        <button class="btn btn-ghost" id="copyAlt" title="Copy alternate link">Copy Link</button>
+      </div>
+      <p class="note">Alternate stream: <span id="altUrlText">https://247kirtanplayer.ismyradio.com/</span></p>
+    </div>
+  </div>
+
+<script>
+(() => {
+  const ALTERNATE_URL = 'https://247kirtanplayer.ismyradio.com/';
+
+  /* ===== Auto-hide controls ===== */
+  const controls = document.getElementById('controls');
+  let hideTimer = null, interacting = false;
+  const HIDE_AFTER = 2000;
+  const npTitleClone = document.getElementById('npTitleClone');
+
+  document.addEventListener("contextmenu", e => {
+  if (e.target.tagName === "VIDEO") {
+    e.preventDefault(); // disable right-click menu
+  }
+});
+
+
+  function showControls(){ document.body.classList.add('controls-visible'); resetHideTimer(); }
+  function hideControls(){ if(!interacting) document.body.classList.remove('controls-visible'); }
+  function resetHideTimer(){ clearTimeout(hideTimer); hideTimer = setTimeout(hideControls, HIDE_AFTER); }
+
+  const startInteract = () => { interacting = true; clearTimeout(hideTimer); };
+  const endInteract   = () => { interacting = false; resetHideTimer(); };
+  controls.addEventListener('mouseenter', startInteract);
+  controls.addEventListener('mouseleave', endInteract);
+  controls.addEventListener('pointerdown', startInteract);
+  window.addEventListener('pointerup', endInteract);
+  controls.addEventListener('focusin', startInteract);
+  controls.addEventListener('focusout', endInteract);
+  ['mousemove','touchstart','keydown','pointermove'].forEach(evt=>document.addEventListener(evt, showControls, {passive:true}));
+  window.addEventListener('load', showControls);
+
+  /* ===== Audio + waveform + EQ ===== */
+  const audio = document.getElementById('radio');
+  const playBtn = document.getElementById('playBtn');
+  const muteBtn = document.getElementById('muteBtn');
+  const vol = document.getElementById('vol');
+  const eqPresetEl = document.getElementById('eqPreset');
+  const trackTitle = document.getElementById('trackTitle');
+  const npTitleEl = document.getElementById('npTitle');
+  const npCopyBtn = document.getElementById('npCopyBtn');
+  const npYTBtn   = document.getElementById('npYTBtn');
+  const npTrack   = document.getElementById('npTrack');   // the scrolling track
+  const nowPlayingCard = document.getElementById('nowPlaying');
+  let marqueeHoldMs = 1200; // pause length (ms)
+  const STATS_URL = 'https://sapircast.caster.fm:10445/admin/publicstats.json';
+  const MOUNT = '/VCDm1'; // change if your mount changes
+  const COVER_RULES = [
+    { pattern: /prabhjeevan/i, img: 'assets/covers/prabhjeevan.jpg', badge: 'Bhai Prabhjeevan Singh' },
+    { pattern: /rasvinder\s*singh|rasvinder/i, img: 'assets/covers/rasvinder.jpg', badge: 'Bhai Rasvinder Singh' },
+    { pattern: /jagpal\s*singh|jagpal/i, img: 'assets/covers/jagpal.jpg', badge: 'Bhai Jagpal Singh' },
+    { pattern: /harpreet\s*singh|harpreet/i, img: 'assets/covers/harpreet.jpg', badge: 'Bhai Harpreet Singh' },
+    { pattern: /harroop\s*singh|harroop/i, img: 'assets/covers/harroop.jpg', badge: 'Bibi Harroop Kaur' },
+  ];
+  const DEFAULT_COVER = 'assets/covers/default.png';
+
+  let lastTitle = '';
+
+  async function fetchNowPlaying() {
+    try {
+      const res = await fetch(STATS_URL, { mode: 'cors', cache: 'no-store' });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const payload = await res.json();            // array
+      const withSource = payload.find(x => x && x.source)?.source || {};
+
+      // pick the configured mount or fall back to the first available
+      const src = withSource[MOUNT] ?? withSource[Object.keys(withSource)[0]];
+
+      // try common places for the title
+      let title =
+        src?.metadata?.x_icy_title ||
+        src?.['display-title'] ||
+        src?.playlist?.playlist?.track?.[0]?.title || '';
+
+      title = (title || '').replace(/\s+/g, ' ').trim();
+      if (title && title !== lastTitle) {
+          lastTitle = title;
+
+          // Update the top-right Now Playing card first
+          updateNowPlayingUI(title);
+          npTitle.textContent = clean;
+          npTitle.title = clean;
+          if (npTitleClone) npTitleClone.textContent = clean;
+
+
+          // Then update the center title if it exists
+          if (trackTitle) {
+            trackTitle.textContent = title;
+            trackTitle.title = title;
+          }
+        }
+
+    } catch (e) {
+      // fail silently (stats can be gated or CORS-blocked)
+    }
+  }
+
+  function pauseMarquee(ms = marqueeHoldMs){
+  if (!npTrack) return;
+  npTrack.style.animationPlayState = 'paused';
+  clearTimeout(npTrack._holdTimer);
+  npTrack._holdTimer = setTimeout(() => {
+    npTrack.style.animationPlayState = 'running';
+  }, ms);
+}
+
+// pause briefly every time the animation wraps back to start
+if (npTrack) {
+  npTrack.addEventListener('animationiteration', () => pauseMarquee());
+}
+
+// ensure we never stay paused after hover/focus toggles
+if (nowPlayingCard) {
+  nowPlayingCard.addEventListener('mouseenter', () => { npTrack.style.animationPlayState = 'running'; });
+  nowPlayingCard.addEventListener('mouseleave', () => { npTrack.style.animationPlayState = 'running'; });
+}
+
+  function pickCoverFor(title=''){
+    for (const rule of COVER_RULES){
+      if (rule.pattern.test(title)) return { img: rule.img, badge: rule.badge || 'Now Playing' };
+    }
+    return { img: DEFAULT_COVER, badge: 'Now Playing' };
+  }
+
+  function flash(btn, text, ms=1100){
+    const prev = btn.textContent;
+    btn.textContent = text;
+    btn.disabled = true;
+    setTimeout(()=>{ btn.textContent = prev; btn.disabled = false; }, ms);
+  }
+
+  npCopyBtn.addEventListener('click', async () => {
+    const txt = (npTitleEl?.textContent || '').trim();
+    if (!txt) return;
+    try{
+      await navigator.clipboard.writeText(txt);
+      flash(npCopyBtn, '✓');
+    }catch{
+      flash(npCopyBtn, 'Err');
+    }
+  });
+
+  npYTBtn.addEventListener('click', () => {
+    const q = (npTitleEl?.textContent || '').trim();
+    if (!q) return;
+    const url = 'https://www.youtube.com/results?search_query=' + encodeURIComponent(q);
+    window.open(url, '_blank', 'noopener');
+  });
+
+
+function updateNowPlayingUI(title){
+  const npCard = document.getElementById('nowPlaying');
+  const npTitle = document.getElementById('npTitle');
+  const npCover = document.getElementById('npCover');
+  const labelEl = npCard.querySelector('.np-label');
+
+  const clean = (title || 'Live Stream').trim();
+  npTitle.textContent = clean;
+  pauseMarquee(); // brief pause at the beginning of each new/updated title
+  npTitle.title = clean;
+
+  const { img, badge } = pickCoverFor(clean);
+  labelEl.textContent = badge;
+
+  if (img && npCover.dataset.src !== img){
+    npCover.style.opacity = 0;
+    npCover.onload = () => { npCover.style.opacity = 1; };
+    npCover.src = img;
+    npCover.dataset.src = img;
+  }
+
+  npCard.classList.add('show');
+}
+
+
+  // Kick off and poll every 15s
+  fetchNowPlaying();
+  updateNowPlayingUI(lastTitle || 'Live Stream');
+  setInterval(fetchNowPlaying, 15000);
+
+  // Also refresh whenever playback starts
+  audio.addEventListener('playing', fetchNowPlaying);
+
+
+  const wave = document.getElementById('wave');
+  const wctx = wave.getContext('2d');
+
+  let AC, analyser, data, srcNode, started=false;
+  let gainNode, lowShelf, presence, highShelf;
+
+  function resize(){
+    const cssW = wave.clientWidth, cssH = wave.clientHeight;
+    const dpr = Math.min(window.devicePixelRatio||1, 2);
+    wave.width = Math.floor(cssW*dpr); wave.height = Math.floor(cssH*dpr);
+    wctx.setTransform(dpr,0,0,dpr,0,0);
+  }
+  window.addEventListener('resize', resize, {passive:true}); resize();
+
+  const BARS=80, GAP=3, RADIUS=1.5;
+
+  function roundRect(ctx,x,y,w,h,r){
+    const rr=Math.min(r,w*.5,h*.5);
+    ctx.beginPath();
+    ctx.moveTo(x+rr,y); ctx.lineTo(x+w-rr,y); ctx.quadraticCurveTo(x+w,y,x+w,y+rr);
+    ctx.lineTo(x+w,y+h-rr); ctx.quadraticCurveTo(x+w,y+h,x+w-rr,y+h);
+    ctx.lineTo(x+rr,y+h); ctx.quadraticCurveTo(x,y+h,x,y+h-rr);
+    ctx.lineTo(x,y+rr); ctx.quadraticCurveTo(x,y,x+rr,y); ctx.closePath();
+  }
+
+  function draw(){
+    requestAnimationFrame(draw);
+    const w = wave.width, h = wave.height;
+    wctx.clearRect(0,0,w,h);
+
+    // Subtle center line
+    wctx.globalAlpha=.15; 
+    wctx.fillStyle='rgba(255,215,0,0.3)'; 
+    wctx.fillRect(0,h/2-0.5,w,1); 
+    wctx.globalAlpha=1;
+
+    let energyArr=null;
+    if(analyser){ analyser.getByteFrequencyData(data); energyArr=data; }
+
+    const totalGap=GAP*(BARS+1), barW=Math.max(2,(w-totalGap)/BARS), maxBarHalf=Math.min(h*.35,45*(w/1200));
+    
+    // Elegant gradient - gold/amber tones
+    const grad=wctx.createLinearGradient(0,h*.3,0,h*.7); 
+    grad.addColorStop(0,'rgba(255,215,0,0.4)'); 
+    grad.addColorStop(0.5,'rgba(255,193,7,0.6)'); 
+    grad.addColorStop(1,'rgba(255,215,0,0.3)');
+    wctx.fillStyle=grad;
+    
+    const step=Math.floor((energyArr?.length||1)/BARS)||1;
+
+    for(let i=0;i<BARS;i++){
+      const x=Math.round(GAP+i*(barW+GAP));
+      const v=energyArr?(energyArr[i*step]/255):0;
+      const eased=Math.pow(v,.9); // Smoother response
+      const halfH=2+eased*maxBarHalf;
+      const topY=(h/2)-halfH; const fullH=halfH*2;
+      roundRect(wctx,x,topY,barW,fullH,RADIUS); wctx.fill();
+    }
+  }
+
+  function disconnectAll(){
+    try{srcNode.disconnect()}catch{}; try{gainNode.disconnect()}catch{};
+    try{lowShelf.disconnect()}catch{}; try{presence.disconnect()}catch{};
+    try{highShelf.disconnect()}catch{}; try{analyser.disconnect()}catch{};
+  }
+
+  function applyEq(mode){
+    if(!AC) return;
+    lowShelf.gain.value=0; presence.gain.value=0; highShelf.gain.value=0;
+    disconnectAll();
+    analyser.connect(AC.destination); srcNode.connect(gainNode);
+    if(mode==='bass'){ lowShelf.gain.value=8; gainNode.connect(lowShelf); lowShelf.connect(analyser); }
+    else if(mode==='vocal'){ presence.frequency.value=1800; presence.Q.value=.9; presence.gain.value=6; gainNode.connect(presence); presence.connect(analyser); }
+    else if(mode==='bright'){ highShelf.gain.value=6; gainNode.connect(highShelf); highShelf.connect(analyser); }
+    else{ gainNode.connect(analyser); }
+  }
+
+  /* ===== Modal helpers ===== */
+  const altModal = document.getElementById('altModal');
+  const altReason = document.getElementById('altReason');
+  const openAlt = document.getElementById('openAlt');
+  const retryBtn = document.getElementById('retryBtn');
+  const copyAlt = document.getElementById('copyAlt');
+  document.getElementById('altUrlText').textContent = ALTERNATE_URL;
+
+  function explainMediaError(err){
+    if(!err) return 'The live stream could not be started.';
+    switch(err.code){
+      case 1: return 'Playback aborted before it started.';
+      case 2: return 'Network error while fetching the stream.';
+      case 3: return 'Media decode error.';
+      case 4: return 'Stream format not supported by this browser.';
+      default: return 'The live stream could not be started.';
+    }
+  }
+  function showAltModal(reason){ altReason.textContent = reason || 'The live stream could not be started.'; altModal.classList.add('show'); }
+  function hideAltModal(){ altModal.classList.remove('show'); }
+
+  openAlt.addEventListener('click', ()=> window.open(ALTERNATE_URL,'_blank','noopener'));
+  copyAlt.addEventListener('click', async ()=>{ try{ await navigator.clipboard.writeText(ALTERNATE_URL); const t=copyAlt.textContent; copyAlt.textContent='Copied!'; setTimeout(()=>copyAlt.textContent=t,1400);}catch{} });
+  retryBtn.addEventListener('click', async ()=>{ hideAltModal(); await retryPlay(); });
+
+  ['error','stalled','abort','emptied'].forEach(evt=>{
+    audio.addEventListener(evt, ()=>{
+      const reason = audio.error ? explainMediaError(audio.error) : 'The live stream is unavailable or blocked.';
+      exitLoadingToPlayIcon();
+      showAltModal(reason);
+    });
+  });
+  let waitingTimer=null;
+  audio.addEventListener('waiting', ()=>{ clearTimeout(waitingTimer); waitingTimer=setTimeout(()=>showAltModal('The stream is taking too long to start.'),8000); });
+  audio.addEventListener('playing', ()=> clearTimeout(waitingTimer));
+
+  /* ===== Loading state helpers (hide play icon) ===== */
+  function enterLoading(){
+    playBtn.classList.add('loading');
+    playBtn.disabled = true;
+    playBtn.setAttribute('aria-busy','true');
+    playBtn.dataset.prevLabel = playBtn.textContent;
+    playBtn.textContent = '';                 // hide icon/text
+  }
+  function exitLoadingToPause(){
+    playBtn.classList.remove('loading');
+    playBtn.disabled = false;
+    playBtn.removeAttribute('aria-busy');
+    playBtn.textContent = '❚❚';
+  }
+  function exitLoadingToPlayIcon(){
+    playBtn.classList.remove('loading');
+    playBtn.disabled = false;
+    playBtn.removeAttribute('aria-busy');
+    playBtn.textContent = '►';
+  }
+
+  async function tryPlayWithTimeout(ms=8000){
+    const playPromise = audio.play();
+    const never = new Promise((_r,rej)=> setTimeout(()=>rej(new Error('timeout')), ms));
+    return Promise.race([playPromise, never]);
+  }
+
+  async function initAudioGraphIfNeeded(){
+    if(AC) return;
+    AC = new (window.AudioContext||window.webkitAudioContext)();
+    analyser = AC.createAnalyser(); analyser.fftSize = 512;
+    data = new Uint8Array(analyser.frequencyBinCount);
+    srcNode = AC.createMediaElementSource(audio); gainNode = AC.createGain();
+    lowShelf = AC.createBiquadFilter(); lowShelf.type='lowshelf'; lowShelf.frequency.value=120;
+    presence = AC.createBiquadFilter(); presence.type='peaking'; presence.frequency.value=1800; presence.Q.value=.9;
+    highShelf = AC.createBiquadFilter(); highShelf.type='highshelf'; highShelf.frequency.value=4500;
+    applyEq('off');
+  }
+
+  async function retryPlay(){
+    try{
+      await initAudioGraphIfNeeded();
+      if(AC.state==='suspended') await AC.resume();
+      audio.load();
+      enterLoading();
+      await tryPlayWithTimeout(9000);
+      exitLoadingToPause();
+      fetchNowPlaying();
+      if(!started){ started=true; draw(); }
+      showControls();
+      trackTitle.textContent='Live Stream';
+      updateNowPlayingUI(lastTitle || 'Live Stream');
+    }catch(err){
+      console.warn('Retry failed:', err);
+      exitLoadingToPlayIcon();
+      showAltModal(err?.message==='timeout' ? 'The stream timed out while starting.' : 'Failed to start the stream.');
+    }
+  }
+
+  /* ===== Main play button ===== */
+  playBtn.addEventListener('click', async ()=>{
+    try{
+      await initAudioGraphIfNeeded();
+      if(audio.paused){
+        if(AC.state==='suspended') await AC.resume();
+        enterLoading();
+        try{
+          await tryPlayWithTimeout(9000);
+          exitLoadingToPause();
+          if(!started){ started=true; draw(); }
+          showControls();
+        }catch(err){
+          exitLoadingToPlayIcon();
+          showAltModal(err?.message==='timeout' ? 'The stream timed out while starting.' : 'Failed to start the stream.');
+        }
+      }else{
+        audio.pause();
+        playBtn.textContent='►';
+      }
+      showControls();
+    }catch(err){
+      console.error(err);
+      exitLoadingToPlayIcon();
+      showAltModal('Unexpected error while initializing audio.');
+    }
+  });
+
+  muteBtn.addEventListener('click', ()=>{ audio.muted=!audio.muted; muteBtn.textContent = audio.muted ? '🔇' : '🔊'; showControls(); });
+  vol.addEventListener('input', e=>{ audio.volume=parseFloat(e.target.value); showControls(); });
+  eqPresetEl.addEventListener('change', e=>{ applyEq(e.target.value); showControls(); });
+})();
+</script>
+</body>
+</html>
