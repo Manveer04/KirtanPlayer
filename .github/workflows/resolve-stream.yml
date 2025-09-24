@@ -1,0 +1,46 @@
+name: Resolve stream URL
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    - cron: "*/30 * * * *"   # every 30 minutes (tune as needed)
+
+permissions:
+  contents: write   # allow committing stream.json
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Playwright
+        run: |
+          npm init -y
+          npm i playwright
+          npx playwright install --with-deps chromium
+
+      - name: Resolve stream
+        env:
+          CASTER_WIDGET_URL: "https://widgets.cloud.caster.fm/player/?token=41a9830e-3fa4-4aef-a0cb-226600fb2946&frameId=2x5fz&theme=dark&color=6C2BDD"
+          STREAM_MATCH_PREFIX: "https://sapircast.caster.fm:10445/VCDm1?token="
+          PRE_CLICK_WAIT_MS: "2000"
+          MATCH_TIMEOUT_MS: "30000"
+        run: node tools/resolve-stream.js
+
+      - name: Commit if changed
+        run: |
+          if [[ -n "$(git status --porcelain stream.json)" ]]; then
+            git config user.name  "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add stream.json
+            git commit -m "chore: update stream.json"
+            git pull --rebase || true
+            git push
+          else
+            echo "No changes to commit."
+          fi
