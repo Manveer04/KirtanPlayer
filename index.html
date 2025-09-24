@@ -381,7 +381,7 @@
 
   <!-- Hidden audio -->
   <audio id="radio" preload="none" crossorigin="anonymous">
-    <source id="primarySource" src="https://sapircast.caster.fm:10445/VCDm1?token=c4022c5bccc50f13b5742c060860de1a" type="audio/mpeg" />
+    <source id="primarySource" type="audio/mpeg" />
   </audio>
 
   <!-- Modal -->
@@ -403,7 +403,34 @@
   </div>
 
 <script>
-(() => {
+  // === BOOTSTRAP: fetch stream.json first, then let the player init ===
+  window.__boot = (async () => {
+    const overlay = document.getElementById('bootOverlay');
+    const source  = document.getElementById('primarySource');
+    const audio   = document.getElementById('radio');
+
+    // Optional last-known-good fallback (kept from your current HTML)
+    const FALLBACK = 'https://sapircast.caster.fm:10445/VCDm1?token=50047da8366f30e461ee378bc9f6369d';
+
+    try {
+      const r = await fetch('stream.json', { cache: 'no-store' });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const data = await r.json();
+      if (!data?.url) throw new Error('No url in stream.json');
+      source.src = data.url;
+    } catch (e) {
+      console.warn('Resolver JSON failed, using fallback:', e);
+      source.src = FALLBACK;   // or show your alternate modal if you prefer
+    }
+
+    try { audio.load(); } catch {}
+    overlay?.remove();
+  })();
+</script>
+
+
+<script>
+window.__boot.then(() => {
   const ALTERNATE_URL = 'https://247kirtanplayer.ismyradio.com/';
 
   /* ===== Auto-hide controls ===== */
@@ -789,7 +816,21 @@ function updateNowPlayingUI(title){
   muteBtn.addEventListener('click', ()=>{ audio.muted=!audio.muted; muteBtn.textContent = audio.muted ? '🔇' : '🔊'; showControls(); });
   vol.addEventListener('input', e=>{ audio.volume=parseFloat(e.target.value); showControls(); });
   eqPresetEl.addEventListener('change', e=>{ applyEq(e.target.value); showControls(); });
-})();
+});
 </script>
+<div id="bootOverlay" style="
+  position:fixed;inset:0;display:grid;place-items:center;
+  background:rgba(0,0,0,.7);backdrop-filter:blur(6px);z-index:99999;
+  font-weight:800;letter-spacing:.4px
+">
+  <div style="text-align:center">
+    <div style="margin-bottom:10px;font-size:1.1rem">Preparing your stream…</div>
+    <div class="spinner" style="
+      width:22px;height:22px;margin:0 auto;border-radius:999px;
+      border:2px solid rgba(255,255,255,.22);border-top-color:#fff;
+      animation:spin .85s linear infinite
+    "></div>
+  </div>
+</div>
 </body>
 </html>
